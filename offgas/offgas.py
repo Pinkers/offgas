@@ -1,7 +1,6 @@
 """ Class for reading data from CO2 monitor.
 
-    (c) Vladimir Filimonov, 2016-2018
-    E-mail: vladimir.a.filimonov@gmail.com
+    E-mail: aerk@berkeley.edu
 """
 try:
     import hid
@@ -14,6 +13,10 @@ except AttributeError as e:
     else:
         raise
 import datetime as dt
+from datetime import datetime
+import sched, time
+import matplotlib.pyplot as plt
+from pathlib import Path
 from contextlib import contextmanager
 import threading
 import time
@@ -63,28 +66,28 @@ def convert_temperature(val):
     """
     return val * 0.0625 - 273.15
 
-
+class NonUniqueNameError(RuntimeError):
+   def __init__(self):
+      self.message = 'ERROR! You must initialize with a unique name, ie. Indican9000'
+      print(self.message)
 #############################################################################
 # Class to operate with CO2 monitor
 #############################################################################
 class CO2monitor:
-    def __init__(self, bypass_decrypt=False):
+
+    def __init__(self, run_name):
         """ Initialize the CO2monitor object and retrieve basic HID info.
-
-            Args:
-                bypass_decrypt (bool): For certain CO2 meter models packages that
-                    are sent over USB are not encrypted. In this case instance
-                    of CO2monitor will return no data in .read_data().
-                    If this happens, setting bypass_decrypt to True might
-                    solve the issue.
-
-            See also:
-                https://github.com/vfilimonov/co2meter/issues/16
         """
-        self.bypass_decrypt = bypass_decrypt
+        # set up directory structure
+        self.name = run_name
+        self.data_dir = Path('downloads\\offgas_data')
+        self.this_runs_dir = Path.joinpath(self.data_dir, self.name)
+        self.setup_directories()
+
         self._info = {'vendor_id': _CO2MON_HID_VENDOR_ID,
                       'product_id': _CO2MON_HID_PRODUCT_ID}
         self._h = hid.device()
+
         # Number of requests to open connection
         self._status = 0
 
@@ -94,10 +97,8 @@ class CO2monitor:
         self._magic_table_int = list_to_longint(_CO2MON_MAGIC_TABLE)
 
         # Initialisation of continuous monitoring
-        if pd is None:
-            self._data = []
-        else:
-            self._data = pd.DataFrame()
+        self._data = pd.DataFrame()
+        self.final_data = pd.DataFrame()
 
         self._keep_monitoring = False
         self._interval = 10
@@ -108,6 +109,7 @@ class CO2monitor:
             self._info['product_name'] = self._h.get_product_string()
             self._info['serial_no'] = self._h.get_serial_number_string()
 
+        print(self.name + " is initialized")
     #########################################################################
     def hid_open(self, send_magic_table=True):
         """ Open connection to HID device. If connection is already open,
@@ -147,8 +149,7 @@ class CO2monitor:
 
     def hid_read(self):
         """ Read 8-byte string from HID device """
-        msg = self._h.read(8)
-        return self._decrypt(msg)
+        return self._h.read(8)
 
     @contextmanager
     def co2hid(self, send_magic_table=True):
@@ -177,8 +178,6 @@ class CO2monitor:
     def _decrypt(self, message):
         """ Decode message received from CO2 monitor.
         """
-        if self.bypass_decrypt:
-            return message
         # Rearrange message and convert to long int
         msg = list_to_longint([message[i] for i in [2, 4, 0, 7, 1, 6, 5, 3]])
         # XOR with magic_table
@@ -263,9 +262,6 @@ class CO2monitor:
                 Results of measurements
         """
         if self._keep_monitoring:
-            if pd is None:
-                return self._data[-1]
-            else:
                 return self._data.iloc[[-1]]
         else:
             vals = self.read_data_raw(max_requests=max_requests)
@@ -301,6 +297,7 @@ class CO2monitor:
             interval : float
                 Interval in seconds between consecutive data reads
         """
+        print("Monitoring has begun, my friend")
         self._interval = interval
         if self._keep_monitoring:
             # If already started then we should not start a new thread
@@ -309,138 +306,51 @@ class CO2monitor:
         t = threading.Thread(target=self._monitoring)
         t.start()
 
+    """working on this one
+    self.s = sched.scheduler(time.time, time.sleep)
+    def continuous_plot(self, interval=10):
+        print("Doing stuff...")
+        s.enter(60, 1, do_something, (sc,))
+        """
+
     def stop_monitoring(self):
         """ Stop continuous monitoring
+            Log the data into a new dataframe called final_data
+             with formatting set up for csv format
         """
         self._keep_monitoring = False
+        self.final_data = self._data.reset_index()
+        self.final_data = self.final_data.rename(columns = {'index':'timestamp'})
+        self.final_data.timestamp = self.final_data.apply(lambda row: row['timestamp'].strftime("%m/%d/%Y, %H:%M:%S"), axis = 1)
 
+    def begin_collecting_data(self):
+        self.start_monitoring()
+
+    def finish_collecting_data(self):
+        self.stop_monitoring()
+        self.log_data()
     #########################################################################
     @property
     def data(self):
         """ All data retrieved with continuous monitoring
         """
         return self._data
+    def setup_directories(self):
+        try:
+            self.data_dir.mkdir()
+        except FileExistsError:
+            pass
+        finally:
+            try:
+                self.this_runs_dir.mkdir()
+            except FileExistsError:
+                raise NonUniqueNameError
 
-    def log_data_to_csv(self, fname):
-        """ Log data retrieved with continuous monitoring to CSV file. If the
-            file already exists, then it will be appended.
-
-            Note, that the method requires pandas package (so far alternative
-            is not implemented).
-
-            Parameters
-            ----------
-            fname : string
-                Filename
+    def log_data(self):
         """
-        if pd is None:
-            raise NotImplementedError('Logging to CSV is implemented '
-                                      'using pandas package only (so far)')
-        if os.path.isfile(fname):
-            # Check the last line to get the timestamp of the last record
-            df = pd.read_csv(fname)
-            last = pd.Timestamp(df.iloc[-1, 0])
-            # Append only new data
-            with open(fname, 'a') as f:
-                self._data[self._data.index > last].to_csv(f, header=False)
-        else:
-            self._data.to_csv(fname)
-
-
-#############################################################################
-def read_csv(fname):
-    """ Read data from CSV file.
-
-        Parameters
-        ----------
-        fname : string
-            Filename
-    """
-    if pd is None:
-        raise NotImplementedError('Reading CSV files is implemented '
-                                  'using pandas package only (so far)')
-    return pd.read_csv(fname, index_col=0, parse_dates=0)
-
-
-#############################################################################
-def plot(data, plot_temp=False, ewma_halflife=30., **kwargs):
-    """ Plot recorded data
-
-        Parameters
-        ----------
-        data : pandas.DataFrame
-            Data indexed by timestamps. Should have columns 'co2' and 'temp'
-        plot_temp : bool
-            If True temperature will be also plotted
-        ewma_halflife : float
-            If specified (not None) data will be smoothed using EWMA
-    """
-    global plt
-    if plt is None:
-        import matplotlib.pyplot as _plt
-        plt = _plt
-
-    if pd is None:
-        raise NotImplementedError('Plotting is implemented so far '
-                                  'using pandas package only')
-
-    # DataFrames
-    if (ewma_halflife is not None) and (ewma_halflife > 0):
-        halflife = pd.Timedelta(ewma_halflife, 's') / pd.np.mean(pd.np.diff(data.index))
-        co2 = pd.ewma(data.co2, halflife=halflife, min_periods=0)
-        temp = pd.ewma(data.temp, halflife=2 * halflife, min_periods=0)
-    else:
-        co2 = data.co2
-        temp = data.temp
-
-    co2_r = co2.copy()
-    co2_g = co2.copy()
-    co2_r[co2_r <= CO2_HIGH] = pd.np.NaN
-    co2_g[co2_g >= CO2_LOW] = pd.np.NaN
-
-    # Plotting
-    ax = kwargs.pop('ax', plt.gca())
-
-    ax.fill_between(co2_r.index, co2_r.values, CO2_HIGH,
-                    alpha=0.5, color=_COLORS['r'])
-    ax.fill_between(co2_g.index, co2_g.values, CO2_LOW,
-                    alpha=0.5, color=_COLORS['g'])
-
-    ax.axhline(CO2_LOW, color=_COLORS['g'], lw=2, ls='--')
-    ax.axhline(CO2_HIGH, color=_COLORS['r'], lw=2, ls='--')
-
-    ax.plot(co2.index, co2.values, lw=2, color='k')
-
-    yl = ax.get_ylim()
-    ax.set_ylim([min(600, yl[0]), max(1400, yl[1])])
-    ax.set_ylabel('CO2 concentration, ppm')
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=0,
-             horizontalalignment='center')
-
-    if plot_temp:
-        ax2 = ax.twinx()
-        ax2.plot(temp.index, temp.values, color=_COLORS['b'])
-        ax2.set_ylabel('Temperature, C')
-        yl = ax2.get_ylim()
-        ax2.set_ylim([min(19, yl[0]), max(23, yl[1])])
-        ax2.grid('off')
-
-    plt.tight_layout()
-
-
-#############################################################################
-# Entry points
-#############################################################################
-def start_homekit():
-    from .homekit import start_homekit as start
-    start()
-
-
-def start_server():
-    from .server import start_server as start
-    start()
-
-
-def start_server_homekit():
-    from .server import start_server_homekit as start
-    start()
+        Log data retrieved with continuous monitoring to CSV file.
+        Logs the plot as a .png
+        """
+        fig = self.data.plot(secondary_y='temp').get_figure()
+        fig.savefig(Path.joinpath(self.this_runs_dir, 'plot.png'))
+        self.final_data.to_csv(Path.joinpath(self.this_runs_dir, 'data.csv'))
