@@ -42,8 +42,8 @@ Then installation of `offgas` could be done via the `pip` utility:
 **Note 2**: there were reports on issues with installation on Raspbian Stretch Lite (#5), where build failed with and `error code 1` in `gcc`. Most likely the reason is in missing dependencies. Possible solution is [described in the comment](https://github.com/vfilimonov/co2meter/issues/5#issuecomment-407378515).
 
 # General usage
-
-### Basic use
+For use an installation information, please refer to this document:
+https://docs.google.com/document/d/1L_e6t-ozMhAdR6lXUg6k27rPrvNLo_TnjLKhs7ccsZU/edit?usp=sharing
 
 # Notes
 
