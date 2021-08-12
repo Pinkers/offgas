@@ -4,6 +4,7 @@
 
 
     wok bock chalk flock nok cok sok crok gok lok sorok
+    gorgin gorgin gorgin forgin sorgin morgan
 """
 try:
     import hid
