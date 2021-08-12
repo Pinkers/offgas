@@ -1,6 +1,9 @@
 """ Class for reading data from CO2 monitor.
 
     E-mail: aerk@berkeley.edu
+
+
+    wok bock chalk flock nok cok sok crok gok lok
 """
 try:
     import hid

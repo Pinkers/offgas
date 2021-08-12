@@ -1,6 +1,9 @@
 """ Class for reading data from CO2 monitor.
 
     E-mail: aerk@berkeley.edu
+
+
+    wok bock chalk flock nok cok sok crok gok lok sorok
 """
 try:
     import hid
@@ -80,7 +83,7 @@ class CannotConnectError(RuntimeError):
 class Offgasmonitor:
 
     def __init__(self, run_name):
-        """ Initialize the CO2monitor object and retrieve basic HID info.
+        """ Initialize the Offgasmonitor object and retrieve basic HID info.
         """
 
         self._info = {'vendor_id': _CO2MON_HID_VENDOR_ID,
