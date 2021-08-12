@@ -27,9 +27,8 @@ try:
     import pandas as pd
 except ImportError:
     pd = None
-
-_CO2MON_HID_VENDOR_ID = 0x04d9
-_CO2MON_HID_PRODUCT_ID = 0xa052
+_CO2MON_HID_VENDOR_ID = 1241 #0x04d9 #
+_CO2MON_HID_PRODUCT_ID = 41042 #0xa052 #
 _CO2MON_MAGIC_WORD = b'Htemp99e'
 _CO2MON_MAGIC_TABLE = (0, 0, 0, 0, 0, 0, 0, 0)
 
@@ -70,23 +69,24 @@ class NonUniqueNameError(RuntimeError):
    def __init__(self):
       self.message = 'ERROR! You must initialize with a unique name, ie. Indican9000'
       print(self.message)
+
+class CannotConnectError(RuntimeError):
+   def __init__(self):
+      self.message = 'Cannot connect to HID device'
+      print(self.message)
 #############################################################################
 # Class to operate with CO2 monitor
 #############################################################################
-class CO2monitor:
+class Offgasmonitor:
 
     def __init__(self, run_name):
         """ Initialize the CO2monitor object and retrieve basic HID info.
         """
-        # set up directory structure
-        self.name = run_name
-        self.data_dir = Path('downloads\\offgas_data')
-        self.this_runs_dir = Path.joinpath(self.data_dir, self.name)
-        self.setup_directories()
 
         self._info = {'vendor_id': _CO2MON_HID_VENDOR_ID,
                       'product_id': _CO2MON_HID_PRODUCT_ID}
         self._h = hid.device()
+        self._handle = 1
 
         # Number of requests to open connection
         self._status = 0
@@ -107,7 +107,13 @@ class CO2monitor:
         with self.co2hid():
             self._info['manufacturer'] = self._h.get_manufacturer_string()
             self._info['product_name'] = self._h.get_product_string()
-            self._info['serial_no'] = self._h.get_serial_number_string()
+            self._info['serial_no'] = self._h.get_serial_number_string
+
+        # set up directory structure
+        self.name = run_name
+        self.data_dir = Path('downloads\\offgas_data')
+        self.this_runs_dir = Path.joinpath(self.data_dir, self.name)
+        self.setup_directories()
 
         print(self.name + " is initialized")
     #########################################################################
@@ -122,12 +128,24 @@ class CO2monitor:
                 If True then the internal "magic table" will be sent to
                 the device (it is used for decryption)
         """
+        handle = self._h.open(_CO2MON_HID_VENDOR_ID, _CO2MON_HID_PRODUCT_ID)
+        if not handle:
+            #raise CannotConnectError
+            pass
+        else:
+            self._handle = handle
+            print('device connected')
+        """
         if self._status == 0:
             # If connection was not opened before
+
             self._h.open(self._info['vendor_id'], self._info['product_id'])
             if send_magic_table:
                 self._h.send_feature_report(self._magic_table)
         self._status += 1
+        """
+    def handle(self):
+        return self._handle
 
     def hid_close(self, force=False):
         """ Close connection to HID device. If there were several hid_open()
@@ -284,9 +302,11 @@ class CO2monitor:
                     vals = pd.DataFrame({'co2': vals[1], 'temp': vals[2]},
                                         index=[vals[0]])
                     self._data = self._data.append(vals)
+                #self.plot()
                 time.sleep(self._interval)
-
-    def start_monitoring(self, interval=5):
+    def plot(self):
+        self.data.plot(secondary_y='temp')
+    def start_monitoring(self, interval=20):
         """ Start continuous monitoring of the values and collecting them
             in the list / pandas.DataFrame.
             The monitoring is started in a separate thread, so the current
